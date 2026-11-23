@@ -23,8 +23,10 @@ type barrier struct {
 // createBarrier creates and initialises a reusable barrier.
 // N is the number of goroutines that must reach the barrier
 // before any of them can continue.
-func createBarrier(N int) barrier {
-	theBarrier := barrier{
+//
+// A pointer is returned so the mutex is not copied.
+func createBarrier(N int) *barrier {
+	theBarrier := &barrier{
 		turnstile1: make(chan bool, 1),
 		turnstile2: make(chan bool, 1),
 		total:      N,
@@ -39,7 +41,10 @@ func createBarrier(N int) barrier {
 }
 
 // wait blocks each goroutine until all goroutines have reached
-// the barrier. The barrier then resets so that it can be used again.
+// the barrier.
+//
+// After all goroutines pass through, the barrier resets so
+// that the same barrier can be used again.
 func (b *barrier) wait() {
 
 	// -------------------------
@@ -61,8 +66,9 @@ func (b *barrier) wait() {
 	b.theLock.Unlock()
 
 	// Pass through turnstile 1.
-	// The token is immediately returned so the next
-	// goroutine can also pass.
+	//
+	// Each goroutine takes the token and immediately returns it
+	// so the next goroutine can also pass through.
 	<-b.turnstile1
 	b.turnstile1 <- true
 
@@ -72,11 +78,13 @@ func (b *barrier) wait() {
 
 	b.theLock.Lock()
 
-	// Record that a goroutine has left the barrier.
+	// Record that one goroutine has left the barrier.
 	b.count--
 
 	// The final goroutine to leave closes turnstile 1
-	// and opens turnstile 2.
+	// and reopens turnstile 2.
+	//
+	// This resets the barrier for the next use.
 	if b.count == 0 {
 		<-b.turnstile1
 		b.turnstile2 <- true
@@ -97,22 +105,23 @@ func WorkWithRendezvous(
 	theBarrier *barrier,
 ) bool {
 
+	// Ensure the WaitGroup is updated when this goroutine finishes.
 	defer wg.Done()
 
-	// Random delay so the goroutines reach the barrier
+	// Random delay so that goroutines reach the barrier
 	// at different times.
 	delay := time.Duration(rand.IntN(5))
 	time.Sleep(delay * time.Second)
 
 	fmt.Println("Part A", num)
 
-	// First use of the barrier.
+	// First use of the reusable barrier.
 	theBarrier.wait()
 
 	fmt.Println("Part B", num)
 
-	// Add another random delay before reaching
-	// the barrier for a second time.
+	// Add another random delay before using
+	// the same barrier again.
 	delay = time.Duration(rand.IntN(5))
 	time.Sleep(delay * time.Second)
 
@@ -130,7 +139,7 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	// Create one reusable barrier for all 5 goroutines.
+	// Create one reusable barrier shared by all 5 goroutines.
 	theBarrier := createBarrier(threadCount)
 
 	wg.Add(threadCount)
@@ -140,7 +149,7 @@ func main() {
 		go WorkWithRendezvous(
 			&wg,
 			n,
-			&theBarrier,
+			theBarrier,
 		)
 	}
 
